@@ -68,11 +68,11 @@ export const ShiftCheatSheet: React.FC<ShiftCheatSheetProps> = ({
                 <div className="text-right space-y-2">
                   <div className="flex flex-col items-end">
                     <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Senin - Jumat</span>
-                    <span className="text-sm font-black text-slate-900">{config.timeRange.weekday}</span>
+                    <span className="text-sm font-black text-slate-900">{config.weekday}</span>
                   </div>
                   <div className="flex flex-col items-end">
                     <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Sabtu - Minggu</span>
-                    <span className="text-sm font-black text-indigo-600">{config.timeRange.weekend}</span>
+                    <span className="text-sm font-black text-indigo-600">{config.weekend}</span>
                   </div>
                 </div>
               </div>

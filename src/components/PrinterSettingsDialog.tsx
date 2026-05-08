@@ -73,7 +73,7 @@ export const PrinterSettingsDialog: React.FC<PrinterSettingsDialogProps> = ({
               </div>
               <DialogTitle className="text-lg font-bold text-slate-900">Pengaturan Printer</DialogTitle>
             </div>
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+            <button onClick={onClose} title="Tutup" className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -105,7 +105,6 @@ export const PrinterSettingsDialog: React.FC<PrinterSettingsDialogProps> = ({
                 {(status === 'disconnected' || status === 'error') && isSupported && (
                   <Button
                     onClick={onConnect}
-                    disabled={status === 'connecting'}
                     className="h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-none"
                   >
                     <Bluetooth className="w-3.5 h-3.5 mr-1.5" />

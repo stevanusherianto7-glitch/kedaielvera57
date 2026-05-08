@@ -2,7 +2,7 @@ import { ShiftType } from './types';
 
 export const SHIFT_TYPES: ShiftType[] = [ShiftType.Pagi, ShiftType.Sore, ShiftType.Full, ShiftType.Off];
 
-export const SHIFT_DETAILS: Record<ShiftType, { label: string; timeRange: string; colorFrom: string; colorTo: string; code: string; type: ShiftType }> = {
+export const SHIFT_DETAILS: Record<ShiftType, { label: string; timeRange: string; colorFrom: string; colorTo: string; code: string; type: ShiftType; weekday: string; weekend: string }> = {
   [ShiftType.Pagi]: {
     label: 'Pagi',
     timeRange: '08:00 - 16:00',

@@ -153,12 +153,17 @@ export const JobdeskManager: React.FC<JobdeskManagerProps> = ({
   }, [laborCostPercentage]);
 
   const handleApplyPattern = (patternToApply: Record<string, ShiftType[]>) => {
-    const newShiftsForMonth = generateShiftsFromPattern(
-        currentDate.getFullYear(),
-        currentDate.getMonth(),
-        employees,
-        patternToApply
-    );
+    const startStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0];
+    const endStr = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).toISOString().split('T')[0];
+    
+    const newShiftsForMonth: Record<string, Record<string, ShiftType>> = {};
+    
+    employees.forEach(emp => {
+      const pattern = patternToApply[emp.id];
+      if (pattern) {
+        newShiftsForMonth[emp.id] = generateShiftsFromPattern(startStr, endStr, pattern);
+      }
+    });
 
     setShifts(prevShifts => {
         const updatedShifts = { ...prevShifts };
@@ -240,7 +245,7 @@ export const JobdeskManager: React.FC<JobdeskManagerProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
           <Dialog open={isAddingEmployee} onOpenChange={setIsAddingEmployee}>
-            <DialogTrigger render={<button type="button" className="sdm-dashboard-card group border-dashed border-2 border-slate-200 bg-slate-50/30 cursor-pointer text-left w-full" />}>
+            <DialogTrigger render={<button type="button" title="Tambah Karyawan" className="sdm-dashboard-card group border-dashed border-2 border-slate-200 bg-slate-50/30 cursor-pointer text-left w-full" />}>
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center mb-6 border border-slate-100 group-hover:bg-slate-900 transition-colors shadow-sm">
                   <Plus className="w-8 h-8 text-slate-900 group-hover:text-white transition-colors" />
                 </div>
