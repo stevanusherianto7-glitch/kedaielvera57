@@ -175,6 +175,7 @@ function AppContent() {
             transactions={transactions}
             recipes={recipes}
             ingredients={ingredients}
+            promoEvents={state.promoEvents}
             onTabChange={setActiveTab}
             onProcessTransaction={state.handleProcessTransaction}
             theme={state.theme}

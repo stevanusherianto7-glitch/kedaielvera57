@@ -47,11 +47,25 @@ export interface Employee {
   initials?: string;
 }
 
+export interface PromoEvent {
+  id: string;
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  discountPercent: number;
+  discountAmount: number;
+  isActive: boolean;
+}
+
 export interface TransactionItem {
   recipeId: string;
   name: string;
   quantity: number;
   price: number;
+  discountPercent?: number;
+  discountAmount?: number;
+  promoEventId?: string;
+  discountedSubtotal?: number;
 }
 
 export interface Transaction {
@@ -61,13 +75,14 @@ export interface Transaction {
   totalHpp: number;
   paymentMethod: string;
   items: TransactionItem[];
+  discountAmount?: number; // Manual discount on total
 }
 
 export interface Attendance {
   id: string;
   employeeId: string;
   date: string;
-  status: 'masuk' | 'ijin' | 'sakit' | 'alfa' | 'off' | 'Hadir' | 'Izin' | 'Alpha' | 'Sakit';
+  status: 'Hadir' | 'Izin' | 'Sakit' | 'Alpha' | 'Off';
 }
 
 export type ExpenseCategory = 'Operasional' | 'Bahan Baku' | 'Gaji' | 'Lainnya';

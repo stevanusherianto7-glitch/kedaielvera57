@@ -92,6 +92,8 @@ export function useThermalPrinter() {
           name: i.name,
           quantity: i.quantity,
           price: i.price,
+          discountPercent: i.discountPercent,
+          discountAmount: i.discountAmount,
         })),
         totalPrice: transaction.totalPrice,
         paymentMethod: transaction.paymentMethod,

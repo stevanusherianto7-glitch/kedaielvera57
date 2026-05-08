@@ -11,7 +11,7 @@ import {
   Printer,
   Bluetooth
 } from "lucide-react";
-import { Recipe, Ingredient, Transaction, TransactionItem } from "../types";
+import { Recipe, Ingredient, Transaction, TransactionItem, PromoEvent } from "../types";
 import { formatCurrency, cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ interface SalesSyncProps {
   onClose: () => void;
   recipes: Recipe[];
   ingredients: Ingredient[];
+  promoEvents: PromoEvent[];
   onProcessTransaction: (transaction: Transaction) => void;
   // Thermal printer integration
   onPrintTransaction?: (transaction: Transaction) => Promise<void>;
@@ -43,6 +44,7 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
   onClose,
   recipes,
   ingredients,
+  promoEvents = [],
   onProcessTransaction,
   onPrintTransaction,
   printerStatus = 'disconnected',
@@ -53,6 +55,8 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
   const [cart, setCart] = React.useState<TransactionItem[]>([]);
   const [paymentMethod, setPaymentMethod] = React.useState<'Tunai' | 'QRIS'>('Tunai');
   const [isPrinting, setIsPrinting] = React.useState(false);
+  const [discountAmount, setDiscountAmount] = React.useState(0);
+  const [selectedPromoEvent, setSelectedPromoEvent] = React.useState<PromoEvent | null>(null);
 
   const filteredRecipes = recipes.filter(r => 
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -96,13 +100,42 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
   const handleSubmit = async () => {
     if (cart.length === 0) return;
     
+    const mappedItems = cart.map(item => {
+      let discountPercent = 0;
+      let itemDiscountAmount = 0;
+      let promoEventId = null;
+      let discountedSubtotal = item.price * item.quantity;
+
+      if (selectedPromoEvent) {
+        discountPercent = selectedPromoEvent.discountPercent;
+        const percentDiscount = discountedSubtotal * (discountPercent / 100);
+        discountedSubtotal -= percentDiscount;
+        discountedSubtotal -= selectedPromoEvent.discountAmount;
+        discountedSubtotal = Math.max(0, discountedSubtotal);
+        
+        itemDiscountAmount = (item.price * item.quantity) - discountedSubtotal;
+        promoEventId = selectedPromoEvent.id;
+      }
+
+      return {
+        ...item,
+        discountPercent,
+        discountAmount: itemDiscountAmount,
+        promoEventId,
+        discountedSubtotal
+      };
+    });
+
+    const totalSalesAfterPromo = mappedItems.reduce((acc, item) => acc + item.discountedSubtotal, 0);
+
     const transaction: Transaction = {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
-      items: cart,
-      totalPrice: totalSales,
+      items: mappedItems,
+      totalPrice: totalSalesAfterPromo - discountAmount,
       totalHpp: 0, // Calculated in handleProcessTransaction
-      paymentMethod
+      paymentMethod,
+      discountAmount
     };
 
     // 1. Process & save transaction (stock deduction etc.)
@@ -250,6 +283,39 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
             </div>
 
             <div className="space-y-4 pt-6 border-t border-slate-200">
+              {/* Promo Section */}
+              {promoEvents.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Promo Event</p>
+                  <div className="flex flex-col gap-2">
+                    {promoEvents.map(event => (
+                      <button
+                        key={event.id}
+                        onClick={() => setSelectedPromoEvent(selectedPromoEvent?.id === event.id ? null : event)}
+                        className={cn(
+                          "p-3 rounded-xl border text-left transition-all flex justify-between items-center",
+                          selectedPromoEvent?.id === event.id
+                            ? "border-emerald-500 bg-emerald-50/50"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        )}
+                      >
+                        <div>
+                          <p className="font-bold text-sm text-slate-900">{event.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {event.discountPercent > 0 ? `${event.discountPercent}%` : ''} 
+                            {event.discountPercent > 0 && event.discountAmount > 0 ? ' + ' : ''}
+                            {event.discountAmount > 0 ? formatCurrency(event.discountAmount) : ''}
+                          </p>
+                        </div>
+                        {selectedPromoEvent?.id === event.id && (
+                          <Badge className="bg-emerald-500 text-white border-none text-[10px] px-1.5 py-0.5">Aktif</Badge>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Payment Method */}
               <div className="space-y-2">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Metode Pembayaran</p>
@@ -276,6 +342,36 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
                   >
                     QRIS
                   </button>
+                </div>
+              </div>
+
+              {/* Discount Section */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Diskon</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {[0, 5, 10, 15].map(percent => (
+                    <button
+                      key={percent}
+                      onClick={() => setDiscountAmount(totalSales * (percent / 100))}
+                      className={cn(
+                        "h-10 rounded-xl font-bold text-xs transition-all",
+                        (discountAmount === totalSales * (percent / 100) && percent !== 0)
+                          ? "bg-emerald-500 text-white"
+                          : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      {percent === 0 ? 'No' : `${percent}%`}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative mt-2">
+                  <Input
+                    type="number"
+                    placeholder="Nominal Diskon (Rp)"
+                    value={discountAmount || ''}
+                    onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                    className="h-10 rounded-xl border-slate-200 text-sm font-medium"
+                  />
                 </div>
               </div>
 
@@ -310,7 +406,10 @@ export const SalesSync: React.FC<SalesSyncProps> = ({
               {/* Total */}
               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-1">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Tagihan</p>
-                <p className="text-3xl font-black text-slate-900 tracking-tight">{formatCurrency(totalSales)}</p>
+                {discountAmount > 0 && (
+                  <p className="text-sm font-bold text-slate-400 line-through">{formatCurrency(totalSales)}</p>
+                )}
+                <p className="text-3xl font-black text-slate-900 tracking-tight">{formatCurrency(totalSales - discountAmount)}</p>
               </div>
 
               {/* Submit Button */}

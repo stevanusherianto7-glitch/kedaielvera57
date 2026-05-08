@@ -78,15 +78,30 @@ const rowToRecipe = (row: any, items: RecipeItem[] = []): Recipe => ({
 });
 
 const transactionToRows = (trans: Transaction) => {
-  return trans.items.map((item, index) => ({
-    id: `${trans.id}-${index}`, // Fixed ID to prevent duplicates on upsert
-    created_at: trans.date,
-    recipe_id: item.recipeId,
-    quantity: item.quantity,
-    total_price: item.price * item.quantity,
-    total_hpp: (trans.totalHpp / trans.items.length), // Approximate split if not individually calculated
-    user_id: TENANT_ID,
-  }));
+  const subtotal = trans.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+  
+  return trans.items.map((item, index) => {
+    const itemTotal = item.price * item.quantity;
+    const itemDiscount = subtotal > 0 ? (itemTotal / subtotal) * (trans.discountAmount || 0) : 0;
+    
+    // Gunakan diskon promo jika ada, jika tidak gunakan diskon manual yang didistribusikan
+    const finalDiscountAmount = item.discountAmount || itemDiscount;
+    const finalDiscountedSubtotal = item.discountedSubtotal || (itemTotal - itemDiscount);
+    
+    return {
+      id: `${trans.id}-${index}`,
+      created_at: trans.date,
+      recipe_id: item.recipeId,
+      quantity: item.quantity,
+      total_price: itemTotal,
+      discount_amount: finalDiscountAmount,
+      discount_percent: item.discountPercent || 0,
+      promo_event_id: item.promoEventId || null,
+      discounted_subtotal: finalDiscountedSubtotal,
+      total_hpp: (trans.totalHpp / trans.items.length),
+      user_id: TENANT_ID,
+    };
+  });
 };
 
 const attendanceToRow = (att: Attendance) => ({
@@ -129,6 +144,7 @@ export function useAppState() {
   const [attendances, setAttendances] = React.useState<Attendance[]>([]);
   const [expenses, setExpenses] = React.useState<Expense[]>([]);
   const [pettyCash, setPettyCash] = React.useState<number>(0);
+  const [promoEvents, setPromoEvents] = React.useState<PromoEvent[]>([]);
   const [theme, setTheme] = React.useState<'light' | 'dark'>(() => {
     try {
       const saved = localStorage.getItem("resto-theme");
@@ -150,6 +166,7 @@ export function useAppState() {
   });
   const [isLoaded, setIsLoaded] = React.useState(false);
   const [isSyncing, setIsSyncing] = React.useState(false);
+  const prevEmployeeIdsRef = React.useRef<string[]>([]);
 
   // No auth required - using fixed TENANT_ID for Supabase access
 
@@ -170,6 +187,11 @@ export function useAppState() {
               const { data: empData } = await supabase.from('employees').select('*');
               const { data: transData } = await supabase.from('transactions').select('*');
               const { data: attData } = await supabase.from('attendances').select('*');
+              const { data: promoData } = await supabase.from('promo_events')
+                .select('*')
+                .eq('is_active', true)
+                .lte('starts_at', new Date().toISOString())
+                .gte('ends_at', new Date().toISOString());
               const { data: expData } = await supabase.from('expenses').select('*').order('date', { ascending: false });
               const { data: configData } = await supabase.from('app_config').select('*');
               
@@ -208,19 +230,32 @@ export function useAppState() {
                   const mappedTrans: Transaction[] = transData.map(row => ({
                     id: row.id,
                     date: row.created_at,
-                    totalPrice: Number(row.total_price),
+                    totalPrice: Number(row.total_price) - Number(row.discount_amount || 0),
                     totalHpp: Number(row.total_hpp),
-                    paymentMethod: 'Tunai', // Default as it's not in DB
+                    paymentMethod: 'Tunai',
                     items: [{
                       recipeId: row.recipe_id,
-                      name: "Item", // We'd need a join to get the name
+                      name: "Item",
                       quantity: row.quantity,
                       price: Number(row.total_price) / row.quantity
-                    }]
+                    }],
+                    discountAmount: Number(row.discount_amount || 0)
                   }));
                   setTransactions(mappedTrans);
                 }
-
+                
+                if (promoData) {
+                  setPromoEvents(promoData.map(row => ({
+                    id: row.id,
+                    name: row.name,
+                    startsAt: row.starts_at,
+                    endsAt: row.ends_at,
+                    discountPercent: Number(row.discount_percent),
+                    discountAmount: Number(row.discount_amount),
+                    isActive: row.is_active
+                  })));
+                }
+                
                 if (attData) setAttendances(attData.map(rowToAttendance));
                 
                 if (shiftData) {
@@ -315,221 +350,207 @@ export function useAppState() {
     };
   }, []);
 
-  // Save data to localStorage & Supabase
+  // --- SYNC FUNCTIONS ---
+
+  const syncIngredients = async () => {
+    if (ingredients.length > 0) {
+      setIsSyncing(true);
+      const ingredientsRows = ingredients.map(ingredientToRow);
+      const { error } = await supabase.from('ingredients').upsert(ingredientsRows);
+      if (error) console.error('Ingredient sync error:', error);
+      setIsSyncing(false);
+    }
+  };
+
+  const syncRecipes = async () => {
+    if (recipes.length > 0) {
+      setIsSyncing(true);
+      try {
+        const recipesRows = recipes.map(recipeToRow);
+        const { error: recErr } = await supabase.from('recipes').upsert(recipesRows);
+        if (recErr) throw recErr;
+
+        const recipeItemsRows: any[] = [];
+        recipes.forEach(rec => {
+          rec.items.forEach(item => {
+            recipeItemsRows.push({
+              recipe_id: rec.id,
+              ingredient_id: item.ingredientId,
+              quantity_needed: item.quantityNeeded,
+              user_id: TENANT_ID
+            });
+          });
+        });
+
+        const recipeIds = recipes.map(r => r.id);
+        await supabase.from('recipe_items').delete().in('recipe_id', recipeIds);
+        
+        if (recipeItemsRows.length > 0) {
+          const { error: itemsErr } = await supabase.from('recipe_items').insert(recipeItemsRows);
+          if (itemsErr) throw itemsErr;
+        }
+      } catch (error) {
+        console.error('Recipe/Items sync error:', error);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  const syncEmployees = async () => {
+    setIsSyncing(true);
+    const currentIds = employees.map(e => e.id);
+    const deletedIds = prevEmployeeIdsRef.current.filter(id => !currentIds.includes(id));
+    
+    if (deletedIds.length > 0) {
+      const { error: delErr } = await supabase.from('employees').delete().in('id', deletedIds);
+      if (delErr) console.warn('Failed to delete removed employees from Supabase:', delErr);
+    }
+    
+    if (employees.length > 0) {
+      const employeesForDb = employees.map(emp => employeeToRow(emp));
+      const { error } = await supabase.from('employees').upsert(employeesForDb);
+      if (error) {
+        console.error('❌ Employee Sync Failed:', error.message, error.details, error.hint);
+      } else {
+        console.log('✅ Employees synced to Supabase:', employees.length);
+      }
+    }
+    
+    prevEmployeeIdsRef.current = currentIds;
+    setIsSyncing(false);
+  };
+
+  const syncTransactions = async () => {
+    if (transactions.length > 0) {
+      setIsSyncing(true);
+      const transactionRows = transactions.flatMap(transactionToRows);
+      const { error } = await supabase.from('transactions').upsert(transactionRows);
+      if (error) console.error('Transaction sync error:', error);
+      setIsSyncing(false);
+    }
+  };
+
+  const syncAttendances = async () => {
+    if (attendances.length > 0) {
+      setIsSyncing(true);
+      const attendancesRows = attendances.map(attendanceToRow);
+      const { error } = await supabase.from('attendances').upsert(attendancesRows);
+      if (error) console.error('Attendance sync error:', error);
+      setIsSyncing(false);
+    }
+  };
+
+  const syncExpenses = async () => {
+    if (expenses.length > 0) {
+      setIsSyncing(true);
+      const expenseRows = expenses.map(expenseToRow);
+      const { error } = await supabase.from('expenses').upsert(expenseRows);
+      if (error) console.error('Expense sync error:', error);
+      setIsSyncing(false);
+    }
+  };
+
+  const syncPettyCash = async () => {
+    setIsSyncing(true);
+    const { error } = await supabase.from('app_config').upsert({
+      id: 'petty_cash',
+      value: pettyCash,
+      user_id: TENANT_ID,
+      updated_at: new Date().toISOString()
+    });
+    if (error) console.error('Petty cash sync error:', error);
+    setIsSyncing(false);
+  };
+
+  const syncShifts = async () => {
+    if (Object.keys(shifts).length > 0) {
+      setIsSyncing(true);
+      const shiftList: any[] = [];
+      Object.entries(shifts).forEach(([employee_id, days]) => {
+        Object.entries(days).forEach(([date, shift_type]) => {
+          shiftList.push({
+            employee_id,
+            date,
+            shift_type,
+            user_id: TENANT_ID
+          });
+        });
+      });
+      
+      if (shiftList.length > 0) {
+        await supabase.from('shifts').upsert(shiftList, { onConflict: 'employee_id,date' });
+      }
+      setIsSyncing(false);
+    }
+  };
+
+  const syncPatterns = async () => {
+    if (Object.keys(weeklyPattern).length > 0) {
+      setIsSyncing(true);
+      const patternList = Object.entries(weeklyPattern).map(([employee_id, pattern]) => ({
+        employee_id,
+        pattern,
+        user_id: TENANT_ID
+      }));
+      await supabase.from('shift_patterns').upsert(patternList, { onConflict: 'employee_id' });
+      setIsSyncing(false);
+    }
+  };
+
+  // --- SAVE EFFECTS ---
+
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_ingredients", JSON.stringify(ingredients));
-    
-    const syncIngredients = async () => {
-      if (ingredients.length > 0) {
-        setIsSyncing(true);
-        const ingredientsRows = ingredients.map(ingredientToRow);
-        const { error } = await supabase.from('ingredients').upsert(ingredientsRows);
-        if (error) console.error('Ingredient sync error:', error);
-        setIsSyncing(false);
-      }
-    };
     syncIngredients();
   }, [ingredients, isLoaded]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_recipes", JSON.stringify(recipes));
-
-    const syncRecipes = async () => {
-      if (recipes.length > 0) {
-        setIsSyncing(true);
-        try {
-          // 1. Sync metadata
-          const recipesRows = recipes.map(recipeToRow);
-          const { error: recErr } = await supabase.from('recipes').upsert(recipesRows);
-          if (recErr) throw recErr;
-
-          // 2. Sync items (BOM)
-          const recipeItemsRows: any[] = [];
-          recipes.forEach(rec => {
-            rec.items.forEach(item => {
-              recipeItemsRows.push({
-                recipe_id: rec.id,
-                ingredient_id: item.ingredientId,
-                quantity_needed: item.quantityNeeded,
-                user_id: TENANT_ID
-              });
-            });
-          });
-
-          // Delete old items first to handle removals
-          // (In a more robust system, we would use a more precise delete or separate IDs)
-          const recipeIds = recipes.map(r => r.id);
-          await supabase.from('recipe_items').delete().in('recipe_id', recipeIds);
-          
-          if (recipeItemsRows.length > 0) {
-            const { error: itemsErr } = await supabase.from('recipe_items').insert(recipeItemsRows);
-            if (itemsErr) throw itemsErr;
-          }
-        } catch (error) {
-          console.error('Recipe/Items sync error:', error);
-        } finally {
-          setIsSyncing(false);
-        }
-      }
-    };
     syncRecipes();
   }, [recipes, isLoaded]);
-
-  // Track previous employee IDs for delete detection
-  const prevEmployeeIdsRef = React.useRef<string[]>([]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_employees", JSON.stringify(employees));
-
-    const syncEmployees = async () => {
-      setIsSyncing(true);
-      
-      const currentIds = employees.map(e => e.id);
-      const deletedIds = prevEmployeeIdsRef.current.filter(id => !currentIds.includes(id));
-      
-      if (deletedIds.length > 0) {
-        const { error: delErr } = await supabase.from('employees').delete().in('id', deletedIds);
-        if (delErr) console.warn('Failed to delete removed employees from Supabase:', delErr);
-      }
-      
-      if (employees.length > 0) {
-        const employeesForDb = employees.map(emp => employeeToRow(emp));
-        const { error } = await supabase.from('employees').upsert(employeesForDb);
-        if (error) {
-          console.error('❌ Employee Sync Failed:', error.message, error.details, error.hint);
-          // If foreign key error, it likely means the TENANT_ID doesn't exist in auth.users
-          if (error.code === '23503') {
-            console.error('HINT: TENANT_ID likely missing from auth.users. Ensure schema uses UUID without FK for demo mode.');
-          }
-        } else {
-          console.log('✅ Employees synced to Supabase:', employees.length);
-        }
-      }
-      
-      prevEmployeeIdsRef.current = currentIds;
-      setIsSyncing(false);
-    };
     syncEmployees();
   }, [employees, isLoaded]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_transactions", JSON.stringify(transactions));
-
-    const syncTransactions = async () => {
-      if (transactions.length > 0) {
-        setIsSyncing(true);
-        // We only sync the most recent transaction to avoid re-upserting everything 
-        // as our simple single-recipe table doesn't have an external mapping back to our UUID carts
-        // But for this ERP fix, we will just upsert everything and assume ID collisions handle it
-        const transactionRows = transactions.flatMap(transactionToRows);
-        const { error } = await supabase.from('transactions').upsert(transactionRows);
-        if (error) console.error('Transaction sync error:', error);
-        setIsSyncing(false);
-      }
-    };
     syncTransactions();
   }, [transactions, isLoaded]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_attendances", JSON.stringify(attendances));
-
-    const syncAttendances = async () => {
-      if (attendances.length > 0) {
-        setIsSyncing(true);
-        const attendancesRows = attendances.map(attendanceToRow);
-        const { error } = await supabase.from('attendances').upsert(attendancesRows);
-        if (error) console.error('Attendance sync error:', error);
-        setIsSyncing(false);
-      }
-    };
     syncAttendances();
   }, [attendances, isLoaded]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_expenses", JSON.stringify(expenses));
-
-    const syncExpenses = async () => {
-      if (expenses.length > 0) {
-        setIsSyncing(true);
-        const expenseRows = expenses.map(expenseToRow);
-        const { error } = await supabase.from('expenses').upsert(expenseRows);
-        if (error) console.error('Expense sync error:', error);
-        setIsSyncing(false);
-      }
-    };
     syncExpenses();
   }, [expenses, isLoaded]);
 
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto_petty_cash", pettyCash.toString());
-
-    const syncPettyCash = async () => {
-      setIsSyncing(true);
-      const { error } = await supabase.from('app_config').upsert({
-        id: 'petty_cash',
-        value: pettyCash,
-        user_id: TENANT_ID,
-        updated_at: new Date().toISOString()
-      });
-      if (error) console.error('Petty cash sync error:', error);
-      setIsSyncing(false);
-    };
     syncPettyCash();
   }, [pettyCash, isLoaded]);
 
-  // Sync Shifts to Supabase
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto-shift-data", JSON.stringify(shifts));
-
-    const syncShifts = async () => {
-      if (Object.keys(shifts).length > 0) {
-        setIsSyncing(true);
-        const shiftList: any[] = [];
-        Object.entries(shifts).forEach(([employee_id, days]) => {
-          Object.entries(days).forEach(([date, shift_type]) => {
-            shiftList.push({
-              employee_id,
-              date,
-              shift_type,
-              user_id: TENANT_ID
-            });
-          });
-        });
-        
-        if (shiftList.length > 0) {
-          await supabase.from('shifts').upsert(shiftList, { onConflict: 'employee_id,date' });
-        }
-        setIsSyncing(false);
-      }
-    };
     syncShifts();
   }, [shifts, isLoaded]);
 
-  // Sync Patterns to Supabase
   React.useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("resto-shift-pattern", JSON.stringify(weeklyPattern));
-
-    const syncPatterns = async () => {
-      if (Object.keys(weeklyPattern).length > 0) {
-        setIsSyncing(true);
-        const patternList = Object.entries(weeklyPattern).map(([employee_id, pattern]) => ({
-          employee_id,
-          pattern,
-          user_id: TENANT_ID
-        }));
-        await supabase.from('shift_patterns').upsert(patternList, { onConflict: 'employee_id' });
-        setIsSyncing(false);
-      }
-    };
     syncPatterns();
   }, [weeklyPattern, isLoaded]);
 
@@ -817,6 +838,8 @@ export function useAppState() {
     handleAddExpense,
     handleSaveEmployee,
     handleProcessTransaction,
+    promoEvents,
+    setPromoEvents,
     shifts,
     setShifts,
     weeklyPattern,

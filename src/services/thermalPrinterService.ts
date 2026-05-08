@@ -47,7 +47,14 @@ export interface PrinterConfig {
 export interface ReceiptData {
   orderId: string;
   date: string;
-  items: { name: string; quantity: number; price: number }[];
+  items: { 
+    name: string; 
+    quantity: number; 
+    price: number;
+    discountPercent?: number;
+    discountAmount?: number;
+    discountedSubtotal?: number;
+  }[];
   totalPrice: number;
   paymentMethod: string;
   cashReceived?: number;
@@ -56,8 +63,8 @@ export interface ReceiptData {
 export type PrinterStatus = 'disconnected' | 'connecting' | 'connected' | 'printing' | 'error';
 
 // ─── State (module-level singleton) ──────────────────────────────────────────
-let _device: BluetoothDevice | null = null;
-let _characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+let _device: any = null;
+let _characteristic: any = null;
 let _status: PrinterStatus = 'disconnected';
 let _statusListeners: ((s: PrinterStatus) => void)[] = [];
 
@@ -116,7 +123,7 @@ export async function connectBluetoothPrinter(): Promise<boolean> {
     const server = await device.gatt!.connect();
 
     // Try standard printer service first, fallback to Nordic UART
-    let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+    let characteristic: any = null;
     try {
       const service = await server.getPrimaryService(PRINTER_SERVICE_UUID);
       characteristic = await service.getCharacteristic(PRINTER_CHAR_UUID);
@@ -257,13 +264,23 @@ function buildReceiptBuffer(receipt: ReceiptData, config: PrinterConfig): Uint8A
     const subtotal = item.price * item.quantity;
     push(`${itemName}\n`);
     push(twoColumn(`  ${item.quantity}x ${formatIDR(item.price)}`, formatIDR(subtotal), W));
+    
+    if (item.discountAmount && item.discountAmount > 0) {
+      push(twoColumn(`    Diskon (${item.discountPercent || 0}%)`, `-${formatIDR(item.discountAmount)}`, W));
+    }
   });
 
   push(separator('=', W));
 
+  const totalDiscount = receipt.items.reduce((acc, item) => acc + (item.discountAmount || 0), 0);
+  if (totalDiscount > 0) {
+    push(twoColumn('TOTAL DISKON', `-${formatIDR(totalDiscount)}`, W));
+    push(separator('-', W));
+  }
+
   // ── Total ──
   push(CMD.BOLD_ON);
-  push(twoColumn('TOTAL', formatIDR(receipt.totalPrice), W));
+  push(twoColumn('TOTAL AKHIR', formatIDR(receipt.totalPrice), W));
   push(CMD.BOLD_OFF);
 
   if (receipt.cashReceived && receipt.cashReceived > 0) {

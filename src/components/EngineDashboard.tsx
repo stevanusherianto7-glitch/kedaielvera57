@@ -14,13 +14,14 @@ import {
   Settings2
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
-import { Ingredient, Transaction, Recipe } from '../types';
+import { Ingredient, Transaction, Recipe, PromoEvent } from '../types';
 import { SalesSync } from './SalesSync';
 
 interface EngineDashboardProps {
   transactions: Transaction[];
   ingredients: Ingredient[];
   recipes: Recipe[];
+  promoEvents: PromoEvent[];
   onTabChange: (tab: string) => void;
   onProcessTransaction: (transaction: Transaction) => void;
   theme?: 'light' | 'dark';
@@ -39,6 +40,7 @@ export function EngineDashboard({
   transactions,
   ingredients,
   recipes,
+  promoEvents = [],
   onTabChange,
   onProcessTransaction,
   theme = 'dark',
@@ -222,6 +224,7 @@ export function EngineDashboard({
         onClose={() => setIsSalesSyncOpen(false)}
         recipes={recipes}
         ingredients={ingredients}
+        promoEvents={promoEvents}
         onProcessTransaction={onProcessTransaction}
         onPrintTransaction={onPrintTransaction}
         printerStatus={printerStatus}
