@@ -7,14 +7,17 @@
 
 ## 🧭 Ringkasan Proyek
 
-**POSGO** adalah aplikasi Point of Sale (POS) modern berbasis web untuk UMKM Warung Makan. Sistem ini dirancang sebagai *single-tenant SPA (Single Page Application)* yang mencakup manajemen bahan baku, penghitungan HPP (Harga Pokok Penjualan), kasir, SDM (Sumber Daya Manusia), dan laporan keuangan sederhana.
+**POSGO** adalah aplikasi Point of Sale (POS) modern untuk UMKM Warung Makan yang dibangun di atas **Capacitor** — framework hybrid yang memungkinkan satu codebase web (React + Vite) dikompilasi menjadi aplikasi **Android**, **iOS**, maupun **PWA/Web**. Sistem ini dirancang sebagai *single-tenant SPA* yang mencakup manajemen bahan baku, penghitungan HPP (Harga Pokok Penjualan), kasir, SDM (Sumber Daya Manusia), dan laporan keuangan sederhana.
 
 | Atribut | Detail |
 | --- | --- |
 | **Nama Proyek** | POSGO |
 | **Versi** | 1.0.1 |
+| **Framework Hybrid** | **Capacitor** (Ionic) |
+| **Target Platform** | Android · iOS · PWA / Web |
 | **Target Pengguna** | UMKM Warung Makan (single outlet) |
-| **Deployment** | Vercel (SPA) |
+| **Deployment Web** | Vercel (SPA) |
+| **Deployment Mobile** | Android APK / iOS IPA via Capacitor |
 | **Bahasa UI** | Bahasa Indonesia |
 | **Mode Tenant** | Single-tenant (satu `TENANT_ID` tetap, tanpa auth) |
 
@@ -212,8 +215,9 @@ posgo/
 | **@google/genai** | ^1.29.0 | Gemini AI API (opsional) |
 
 ### Fonts & Style
+
 | Library | Kegunaan |
-|---|---|
+| --- | --- |
 | **@fontsource-variable/geist** | Font utama (Geist Variable) |
 | **@tailwindcss/typography** | Styling konten markdown |
 
@@ -243,6 +247,7 @@ TENANT_ID = 'e57a0505-1234-5678-90ab-c0de57f17ac1'
 | `app_config` | Konfigurasi aplikasi (misal: saldo petty cash) |
 
 ### Row Level Security (RLS)
+
 - **Semua tabel** menggunakan RLS dengan policy `Public manage by tenant id`.
 - Query hanya lolos jika `user_id = TENANT_ID`.
 - **Tidak ada autentikasi pengguna** — aplikasi bersifat open single-tenant.
@@ -261,11 +266,13 @@ useAppState()
 ```
 
 **Alur data:**
+
 1. Komponen memanggil fungsi dari `useAppState`
 2. `useAppState` melakukan operasi ke Supabase
 3. State di-update → React re-render otomatis
 
 **Data yang disimpan di `localStorage` (bukan Supabase):**
+
 - `resto-theme` — preferensi tema terang/gelap
 - `resto-shift-data` — data jadwal shift
 - `resto-shift-pattern` — pola shift mingguan
@@ -280,7 +287,7 @@ POSGO mendukung cetak struk via **Web Bluetooth API** dengan protokol **ESC/POS*
 
 - **Service**: `thermalPrinterService.ts` — koneksi, encoding, perintah ESC/POS
 - **Hook**: `useThermalPrinter.ts` — state printer, config toko, auto-print
-- **UI**: `PrinterSettingsDialog.tsx` — dialog konfigurasi printer thermal
+- **UI**: `PrinterSettingsDialog.tsx` — dialog pengaturan printer
 - Kompatibel dengan: Epson TM, SUNMI, Gainscha, iDPRT, Xprinter, RPP series
 - Mendukung dua BLE profile: **Printer Service UUID** & **Nordic UART Service**
 
@@ -301,12 +308,71 @@ Aplikasi menggunakan **tab-based routing** (bukan React Router). State `activeTa
 
 ## 🚀 Deployment
 
+### Web (Vercel)
+
 - **Platform**: Vercel
-- **Project URL**: [Vercel Dashboard](https://vercel.com/antos-projects-b975a4ca/kedaielvera57-psro)
 - **Build command**: `vite build`
 - **Output**: `dist/`
 - `vercel.json` mengkonfigurasi SPA rewrite: semua path → `/index.html`
-- Environment variables di-set langsung di dashboard Vercel atau `vercel.json`
+- Environment variables di-set langsung di dashboard Vercel
+
+### Mobile (Capacitor)
+
+POSGO adalah **proyek Capacitor**. Web assets dikompilasi lalu disalin ke native project Android/iOS.
+
+**Alur build mobile:**
+
+```bash
+# 1. Build web assets
+npm run build
+
+# 2. Salin dist/ ke native project
+npx cap sync
+
+# 3a. Buka di Android Studio
+npx cap open android
+
+# 3b. Buka di Xcode (iOS)
+npx cap open ios
+```
+
+**Perintah penting Capacitor:**
+
+| Perintah | Fungsi |
+| --- | --- |
+| `npx cap init` | Inisialisasi Capacitor di project (sudah dilakukan) |
+| `npx cap add android` | Tambah platform Android |
+| `npx cap add ios` | Tambah platform iOS |
+| `npx cap sync` | Build web + sync ke native (wajib setelah `npm run build`) |
+| `npx cap copy` | Hanya salin web assets tanpa update plugin |
+| `npx cap update` | Update native dependencies |
+| `npx cap run android` | Build & jalankan di emulator/device Android |
+| `npx cap run ios` | Build & jalankan di emulator/device iOS |
+
+**Konfigurasi Capacitor** ada di `capacitor.config.ts` (atau `capacitor.config.json`) di root project:
+
+```ts
+// capacitor.config.ts
+import { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.posgo.app',
+  appName: 'POSGO',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https'
+  }
+};
+```
+
+> ⚠️ **Penting untuk Agen AI**: Jangan pernah menghapus folder `android/` atau `ios/` — ini adalah native project yang di-generate Capacitor. Perubahan kode hanya dilakukan di `src/`, lalu jalankan `npx cap sync`.
+
+**Plugin Capacitor yang mungkin digunakan:**
+
+- `@capacitor/core` — runtime utama
+- `@capacitor-community/bluetooth-le` — Bluetooth untuk printer thermal di mobile
+- `@capacitor/filesystem` — akses file sistem (export PDF)
+- `@capacitor/share` — share dokumen
 
 ---
 
@@ -369,19 +435,25 @@ Nilai ini digunakan sebagai filter RLS di semua tabel Supabase. **Jangan diubah.
 ---
 
 ### RULE 1 — Jangan Ubah `TENANT_ID`
+
 `TENANT_ID` di `useAppState.ts` adalah identifier tetap single-tenant. **Jangan pernah mengubah, memindahkan, atau menjadikannya dinamis** tanpa persetujuan eksplisit pemilik proyek. Mengubahnya akan memutus akses ke semua data di Supabase.
 
 ### RULE 2 — Jangan Modifikasi Komponen `ui/` Secara Manual
+
 Folder `src/components/ui/` dikelola oleh **shadcn/ui**. Modifikasi manual akan tertimpa saat update. Jika perlu kustomisasi, bungkus komponen tersebut dalam komponen baru di level yang lebih tinggi.
 
 ### RULE 3 — Semua State Global Melalui `useAppState`
+
 **Dilarang** membuat state Supabase di luar `useAppState.ts`. Setiap penambahan data baru ke Supabase **harus** ditambahkan sebagai fungsi dan state di dalam hook tersebut, lalu di-expose ke komponen.
 
 ### RULE 4 — Jangan Gunakan `any` Kecuali Terpaksa
+
 TypeScript di proyek ini ketat (`tsc --noEmit` sebagai lint). Hindari `any`. Gunakan tipe yang sudah ada di `src/types.ts`. Jika perlu tipe baru, **tambahkan ke `types.ts`**, bukan inline di komponen.
 
 ### RULE 5 — Gunakan Alias `@/` untuk Import
+
 Selalu gunakan alias `@/` untuk import internal, bukan path relatif yang panjang.
+
 ```ts
 // ✅ Benar
 import { Button } from '@/components/ui/button';
@@ -392,19 +464,32 @@ import { Button } from '../../../components/ui/button';
 ```
 
 ### RULE 6 — Mapping snake_case ↔ camelCase Wajib Konsisten
+
 Supabase mengembalikan data dalam `snake_case`. TypeScript interface menggunakan `camelCase`. **Selalu** gunakan helper mapper (`ingredientToRow`, `rowToIngredient`, dst.) yang sudah ada di `useAppState.ts`. Jangan akses field Supabase langsung di komponen.
 
 ### RULE 7 — Tambahkan `user_id: TENANT_ID` di Setiap Insert
+
 Setiap data baru yang ditulis ke Supabase **wajib menyertakan** `user_id: TENANT_ID`. Tanpa ini, RLS akan memblokir semua operasi read/write.
 
 ### RULE 8 — Jangan Hapus Error Boundary
+
 `ErrorBoundary` di `App.tsx` adalah safety net produksi. Jangan dihapus atau dinonaktifkan. Jika ada error yang tidak tertangani, perbaiki sumbernya, bukan wrappernya.
 
 ### RULE 9 — `localStorage` Hanya untuk Data Non-Kritis
+
 Data bisnis (bahan, resep, transaksi, karyawan) **wajib di Supabase**. `localStorage` hanya untuk preferensi UI dan konfigurasi perangkat (tema, printer config, shift pattern). Jangan simpan data transaksi atau keuangan di `localStorage`.
 
 ### RULE 10 — Jangan Commit Secrets ke Git
-File `.env` dan `vercel.json` yang berisi API key nyata **tidak boleh di-commit**. Gunakan `.env.example` sebagai template. Pastikan `.env` dan `.env.local` ada di `.gitignore`.
+
+File `.env` dan `vercel.json` yang berisi API key nyata **tidak boleh di-commit**. Gunakan `.env.example` as template. Pastikan `.env` dan `.env.local` ada di `.gitignore`.
+
+### RULE 11 — Jangan Modifikasi Folder Native Capacitor Secara Manual
+
+Folder `android/` dan `ios/` adalah hasil generate Capacitor dan dikelola via `npx cap sync`. **Jangan edit file di dalamnya secara langsung** kecuali untuk konfigurasi native (permissions, icons, splash screen) yang memang harus dilakukan di level native. Semua perubahan logika dan UI dilakukan di `src/`, kemudian di-sync dengan `npx cap sync`.
+
+### RULE 12 — Selalu Jalankan `npx cap sync` Setelah Build
+
+Setiap kali ada perubahan kode yang akan di-deploy ke mobile, alurnya wajib: `npm run build` → `npx cap sync`. Jangan langsung buka Android Studio / Xcode tanpa sync terlebih dahulu, karena web assets yang tertanam di native project akan ketinggalan.
 
 ---
 
@@ -426,6 +511,7 @@ Bagian ini **wajib dibaca** sebelum melakukan perubahan apapun pada kodebase.
 ## Pola yang Benar vs Salah
 
 ### ✅ Menambah field baru ke tipe yang ada
+
 ```ts
 // src/types.ts — tambahkan di sini
 export interface Recipe {
@@ -438,6 +524,7 @@ export interface Recipe {
 ```
 
 ### ❌ Membuat tipe inline di komponen
+
 ```ts
 // JANGAN lakukan ini di dalam komponen
 const recipe: { id: string; name: string } = ...
@@ -446,6 +533,7 @@ const recipe: { id: string; name: string } = ...
 ---
 
 ### ✅ Menambah fungsi CRUD baru
+
 ```ts
 // Di useAppState.ts — tambahkan fungsi baru di sini
 const handleUpdateIngredient = async (ing: Ingredient) => {
@@ -458,6 +546,7 @@ const handleUpdateIngredient = async (ing: Ingredient) => {
 ```
 
 ### ❌ Langsung query Supabase dari dalam komponen
+
 ```ts
 // JANGAN lakukan ini di dalam komponen
 const { data } = await supabase.from('ingredients').select('*');
@@ -466,12 +555,14 @@ const { data } = await supabase.from('ingredients').select('*');
 ---
 
 ### ✅ Import komponen UI
+
 ```ts
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 ```
 
 ### ❌ Membuat button/card custom sendiri jika sudah ada di ui/
+
 ```ts
 // JANGAN buat ulang komponen yang sudah ada di ui/
 <div className="border rounded p-4">...</div> // Gunakan <Card> saja
@@ -493,6 +584,9 @@ import { Card, CardContent } from '@/components/ui/card';
 | Memodifikasi file di `src/components/ui/` | Buat wrapper komponen baru |
 | Lupa menangani loading state `isLoaded` | Selalu cek `isLoaded` sebelum render data |
 | Tidak menangani error dari Supabase | Selalu periksa `{ error }` dari setiap operasi |
+| Edit langsung folder `android/` atau `ios/` | Edit di `src/`, lalu `npx cap sync` |
+| Lupa `npx cap sync` setelah `npm run build` | Wajib sync sebelum buka Android Studio/Xcode |
+| Menggunakan Web Bluetooth API langsung di mobile | Gunakan plugin `@capacitor-community/bluetooth-le` untuk Android/iOS |
 
 ---
 
