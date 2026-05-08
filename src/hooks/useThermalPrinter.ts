@@ -23,14 +23,21 @@ const DEFAULT_CONFIG: PrinterConfig = {
   paperWidth: 48,
   storeName: 'ENGINE STATION',
   storeAddress: '',
-  storePhone: '',
+  storePhone: '0895-3763-48626',
   footerMessage: 'Terima kasih atas kunjungan Anda!',
 };
 
 function loadConfig(): PrinterConfig {
   try {
     const saved = localStorage.getItem(CONFIG_KEY);
-    if (saved) return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { 
+        ...DEFAULT_CONFIG, 
+        ...parsed,
+        storePhone: parsed.storePhone || DEFAULT_CONFIG.storePhone 
+      };
+    }
   } catch { /* ignore */ }
   return DEFAULT_CONFIG;
 }
